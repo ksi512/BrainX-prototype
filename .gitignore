@@ -1,0 +1,6 @@
+/brainx
+/dist/
+.DS_Store
+*.bak
+*.tmp
+*.mbz

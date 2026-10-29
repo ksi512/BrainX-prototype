@@ -1,0 +1,35 @@
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Check README placeholder
+        run: |
+          if grep -q '<仓库地址>' README.md; then
+            echo "README still contains <仓库地址>; replace it before tagging."
+            exit 1
+          fi
+      - name: Build packages
+        env:
+          VERSION: ${{ github.ref_name }}
+        run: ./scripts/release.sh
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true
