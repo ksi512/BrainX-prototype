@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -147,6 +148,18 @@ func TestUninstallSelfRemovesBinaryAndPath(t *testing.T) {
 	if err := os.WriteFile(binary, []byte("stub"), 0o755); err != nil {
 		t.Fatal(err)
 	}
+	// Windows 的 PATH 不是文件，UninstallSelf 不改 PATH；这里只验证二进制回收。
+	if runtime.GOOS == "windows" {
+		if _, err := install.UninstallSelf(install.Options{Home: home, Prefix: prefix}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := os.Stat(binary); !os.IsNotExist(err) {
+			t.Fatal("卸载后自装二进制仍在")
+		}
+		return
+	}
+	// shellPathFile 在 Linux 按 $SHELL 选 .zshenv/.profile；固定成 zsh，测试才不依赖 CI shell。
+	t.Setenv("SHELL", "/bin/zsh")
 	zshenv := filepath.Join(home, ".zshenv")
 	block := "export FOO=1\n# brainx\nexport PATH=\"" + prefix + "\":$PATH\n"
 	if err := os.WriteFile(zshenv, []byte(block), 0o600); err != nil {
