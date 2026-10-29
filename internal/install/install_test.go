@@ -144,7 +144,11 @@ func TestUninstallSelfRemovesBinaryAndPath(t *testing.T) {
 	if err := os.MkdirAll(prefix, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	binary := filepath.Join(prefix, "brainx")
+	binaryName := "brainx"
+	if runtime.GOOS == "windows" {
+		binaryName = "brainx.exe"
+	}
+	binary := filepath.Join(prefix, binaryName)
 	if err := os.WriteFile(binary, []byte("stub"), 0o755); err != nil {
 		t.Fatal(err)
 	}
