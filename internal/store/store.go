@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
@@ -12,6 +13,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/ksi512/BrainX-prototype/internal/index"
@@ -177,8 +179,17 @@ func Home() string {
 	return filepath.Join(home, ".brainx")
 }
 func now() int64 { return time.Now().UnixMilli() }
+
+var idSeq atomic.Uint64
+
 func ID() string {
-	return fmt.Sprintf("%x", sha256.Sum256([]byte(fmt.Sprintf("%d-%d", time.Now().UnixNano(), os.Getpid()))))[:26]
+	// Windows 的时钟粒度可能比 UnixNano 粗；只靠 time+pid 会在同一毫秒内
+	// 生成重复 id。加进程内序号和随机 nonce 后，资产/事件的 id 才稳定唯一。
+	var nonce [8]byte
+	_, _ = rand.Read(nonce[:])
+	seed := fmt.Sprintf("%d-%d-%d-%x", time.Now().UnixNano(), os.Getpid(), idSeq.Add(1), nonce)
+	sum := sha256.Sum256([]byte(seed))
+	return hex.EncodeToString(sum[:])[:26]
 }
 func Hash(value string) string {
 	sum := sha256.Sum256([]byte(value))

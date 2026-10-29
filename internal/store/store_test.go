@@ -82,3 +82,17 @@ func TestLinkRequiresExistingAssets(t *testing.T) {
 		t.Fatalf("合法 link 失败: %v", err)
 	}
 }
+
+func TestIDUnique(t *testing.T) {
+	seen := make(map[string]bool, 20000)
+	for i := 0; i < 20000; i++ {
+		id := store.ID()
+		if len(id) != 26 {
+			t.Fatalf("id 长度应为 26：%q", id)
+		}
+		if seen[id] {
+			t.Fatalf("重复 id：%s", id)
+		}
+		seen[id] = true
+	}
+}
