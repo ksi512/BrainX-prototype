@@ -34,7 +34,7 @@ jobs:
           for pkg in $(go list ./...); do
             echo "== testing $pkg =="
             if ! go test -v "$pkg" 2>&1 | tee /tmp/bx-test.log; then
-              grep -A14 'FAIL:' /tmp/bx-test.log | head -120 | while IFS= read -r line; do
+              grep -B6 -A10 'FAIL:' /tmp/bx-test.log | head -120 | while IFS= read -r line; do
                 echo "::error::$line"
               done
               exit 1
