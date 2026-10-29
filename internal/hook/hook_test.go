@@ -125,8 +125,11 @@ func TestSubdirectoryGetsSameBriefAsRepoRoot(t *testing.T) {
 	}
 
 	for _, cwd := range []string{root, deep} {
-		payload := `{"cwd":"` + cwd + `","hook_event_name":"SessionStart"}`
-		out, err := hook.Run(s, "session-start", "claude-code", strings.NewReader(payload))
+		payload, err := json.Marshal(map[string]string{"cwd": cwd, "hook_event_name": "SessionStart"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		out, err := hook.Run(s, "session-start", "claude-code", strings.NewReader(string(payload)))
 		if err != nil {
 			t.Fatal(err)
 		}
