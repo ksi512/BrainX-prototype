@@ -47,7 +47,7 @@ for target in "${targets[@]}"; do
   CGO_ENABLED=0 GOOS="$goos" GOARCH="$goarch" \
     go build -trimpath -ldflags "$LDFLAGS" -o "$stage/$bin" ./cmd/brainx
   cp README.md LICENSE THIRD_PARTY_LICENSES.md SCHEMA.md INTEGRATION.md "$stage/"
-  cp -R docs licenses "$stage/"
+  cp -R licenses "$stage/"
   if [ "$goos" = "windows" ]; then
     (cd "$DIST" && zip -q -r "$name.zip" "$name")
   else

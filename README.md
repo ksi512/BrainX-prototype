@@ -2,76 +2,12 @@
 
 > 单二进制 · 单目录 · 单 SQLite · 零常驻服务 · 默认零模型
 
-BrainX 是一个本地优先的「长期记忆 + 文档知识库」引擎：一个 Go CLI、一个 SQLite 文件、一个可以整体拷走的数据目录。它把散落在会话里的判断和本机不能外传的资料沉淀成一个库，并在每次会话开始时通过宿主 hook 自动把相关上下文注入进去。
+这个系统成因是当时各Agent的记忆系统并未完善，而karpathy提出来wiki之后都在建知识库wiki。而当时做的事非常需要经验主导，一直都没有一个合适的记忆性的东西，所以着手写了一个可以脱机使用的符合我主观+客观经验记录的系统协同，加上后背的知识库wiki就节省了很多时间。现在成熟产品和插件很多，BrainX也花了点时间做了梳理和重构，在一些特殊的非在线场景下使用还是挺不错的。
 
-不依赖常驻服务、云账号、Docker 或模型 API；断网可用，`cp -r` 即迁移。
+其次这不是一个完整产品，仅限于能用。本身一个人就是在抗压的情况下逆人性状态做出来的。但是整体的架构思路可以供需要的人使用。
 
-> 本文描述 BrainX v1 的设计契约与目标形态。当前实现进度见文末「路线图」。
-
-## 目录
-
-- [从零开始](#从零开始)
-- [为什么做这个](#为什么做这个)
-- [核心特点](#核心特点)
-- [与同类方案的取舍](#与同类方案的取舍)
-- [为什么这么设计](#为什么这么设计)
-- [四条硬契约](#四条硬契约)
-- [架构](#架构)
-- [日常使用示例](#日常使用示例)
-- [命令](#命令)
-- [端到端验证](#端到端验证)
-- [数据与迁移](#数据与迁移)
-- [宿主兼容](#宿主兼容)
-- [路线图](#路线图)
-- [设计文档](#设计文档)
-
-## 从零开始
-
-**当前从 GitHub 下载到的是源码，需要自己编译一次**（Go 1.26+，约一分钟）。等以后发布预编译包，这一步可以省掉。
-
-### 源码方式（现在）
-
-```sh
-# 1) 装 Go 1.26+（已装可跳过）；macOS: brew install go
-
-# 2) 下载并编译（GitHub 页面 Code → Download ZIP 也可以）
-git clone https://github.com/ksi512/BrainX-prototype.git && cd BrainX-prototype
-CGO_ENABLED=0 go build -o brainx ./cmd/brainx
-
-# 3) 初始化库（默认 ~/.brainx）
-BRAINX_BIN="$PWD/brainx"
-"$BRAINX_BIN" init
-
-# 4) 装到宿主：在非 git 仓库目录执行，默认写全局配置
-cd ~
-"$BRAINX_BIN" install            # 想先看会写什么，加 --dry-run
-
-# 5) 让 PATH 生效
-source ~/.zshenv                 # Linux 非 zsh 用 ~/.profile；或重开终端
-
-# 6) 检查
-brainx --version
-brainx status
-```
-
-### 预编译包方式（以后）
-
-```sh
-chmod +x brainx
-./brainx init
-cd ~ && /path/to/brainx install
-source ~/.zshenv
-```
-
-> 目前仓库还没打包，`.go` 文件也在整理中；发布流程定了再把下载地址补到这里。
-
-### 装完之后
-
-- 重启 Agent，`SessionStart` 会自动注入 brief——**不需要在对话里说“开启”**。
-- 直接说“记住：……”或“我之前定的……是什么？”，Agent 会调用 `brainx remember` / `brainx recall`。
-- Codex Desktop 首次装完要去 **Settings → Hooks** 点 **Reload hooks** 并信任；CLI 才用 `/hooks`。否则 hook 静默不跑。
-- Codex Desktop 还要让 sandbox 能写 `~/.brainx`；如果 `brainx status` 报 `unable to open database file (14)`，先按下文「Codex Desktop 的三个前提」的情况 A/B 放行，否则会出现“能注入、不能记住”。
-- 卸载：`brainx install --uninstall`；连库一起删：`brainx install --uninstall --purge --yes`（`--purge` 必须配 `--yes`）。
+> 发之前花了一些时间做一些操作系统和Agent适配，Agent我只测了codex。其他的不浪费时间了，遇到的问题应该都是在hook那里，实在懒的让Agent去排查一下就好。
+> 安装完成后Agent的权限应该完全放开，不然会有无法写sqlite的问题。这种问题各自取舍或者自己让Agent适配吧。我自己用完全放开权限所以这个我就没去处理。
 
 ## 为什么做这个
 
@@ -109,6 +45,82 @@ source ~/.zshenv
 
 代价只有一个：hook 每轮起一次进程。这正是选 Go 而不是 TypeScript 的唯一理由——冷启动毫秒级。
 
+
+## 目录
+
+- [为什么做这个](#为什么做这个)
+- [核心特点](#核心特点)
+- [与同类方案的取舍](#与同类方案的取舍)
+- [安装与卸载](#安装与卸载)
+- [为什么这么设计](#为什么这么设计)
+- [四条硬契约](#四条硬契约)
+- [架构](#架构)
+- [命令](#命令)
+- [数据与迁移](#数据与迁移)
+- [兼容性](#兼容性)
+- [里程碑与验收结果](#里程碑与验收结果)
+- [License](#license)
+
+## 安装与卸载
+
+### 从源码编译
+
+```sh
+# 0) 下载并编译（GitHub 页面 Code → Download ZIP 也可以）
+git clone https://github.com/ksi512/BrainX-prototype.git && cd BrainX-prototype
+CGO_ENABLED=0 go build -o brainx ./cmd/brainx
+
+# 1) 初始化库（默认 ~/.brainx）
+BRAINX_BIN="$PWD/brainx"
+"$BRAINX_BIN" init
+
+# 2) 装到宿主：在非 git 仓库目录执行，默认写全局配置
+cd ~
+"$BRAINX_BIN" install            # 想先看会写什么，加 --dry-run
+
+# 3) 让 PATH 生效
+source ~/.zshenv                 # Linux 非 zsh 用 ~/.profile；或重开终端
+
+# 4) 检查
+brainx --version
+brainx status
+```
+
+### 预编译包方式（普通用户）
+
+从 [GitHub Releases](https://github.com/ksi512/BrainX-prototype/releases) 下载对应平台的压缩包，解压后执行。
+
+macOS / Linux：
+
+```sh
+chmod +x brainx
+./brainx init
+cd ~ && /path/to/brainx install
+source ~/.zshenv
+```
+
+Windows：
+
+```powershell
+.\brainx.exe init
+.\brainx.exe install
+```
+
+Windows 的 `install` 不会自动修改 PATH；按安装结果提示把 `%USERPROFILE%\brainx\bin` 加入 PATH，或直接用绝对路径。
+
+
+### 装完之后
+
+- 重启 Agent，`SessionStart` 会自动注入 brief——**不需要在对话里说“开启”**。
+- 直接说“记住：……”或“我之前定的……是什么？”，Agent 会调用 `brainx remember` / `brainx recall`。
+- Codex Desktop 首次装完要去 **Settings → Hooks** 点 **Reload hooks** 并信任；CLI 才用 `/hooks`。否则 hook 静默不跑。
+- Codex Desktop 还要让 sandbox 能写 `~/.brainx`；如果 `brainx status` 报 `unable to open database file (14)`，先按下文「Codex Desktop 的三个前提」的情况 A/B 放行，否则会出现“能注入、不能记住”。
+
+### 卸载
+
+卸载：`brainx install --uninstall`；连库一起删：`brainx install --uninstall --purge --yes`（`--purge` 必须配 `--yes`）。
+
+
 ## 为什么这么设计
 
 ### 1. CLI 主干 + 逐宿主 hook，不做 Proxy
@@ -118,17 +130,43 @@ Proxy 靠「改 base URL + 截流量」换自动注入，代价是全量对话�
 - **代价**：每轮一次进程启动，安装器要逐宿主适配。
 - **不做**：不改宿主请求、不做协议适配层、不做网关。
 
-### 2. 判断交给宿主，引擎不调模型
+### 2. 判断交给Agent，引擎不调模型
 
 巩固需要判断（保留 / 合并 / 归档），但这个判断不该由引擎做：宿主此刻就带着模型和最近的上下文，质量更好。
 
-`dream` 设计成两段式：`--plan` 只产出「候选 + 理由」，零模型调用、零资产写入；`--apply` 只校验与落库——合法 plan、合法决策、不可变约束（当前仅 `--plan` 可用）。
+`dream` 设计成两段式：`--plan` 出候选，`--apply` 应用判断——`--plan` 只产出候选与理由，零模型调用、零资产写入；`--apply` 只校验与落库（合法 plan、合法决策、不可变约束）。
 
 结果：引擎没有任何模型配置项，不借宿主模型，不打包模型权重。
 
 ### 3. 一个 SQLite，不引向量库
 
 FTS5 是 SQLite 内置的。向量默认关闭；启用时也只是显式配置一个 embeddings 端点，暴力算余弦——万级 chunk 在毫秒级，不需要 ANN 索引、不需要扩展、不需要 ONNX 运行时。
+
+### 4.web看板和旋钮
+
+生成看板：
+
+```sh
+brainx report
+brainx report --open          # 生成后直接打开
+brainx report --out /path/to/report.html
+```
+
+默认写到 `$BRAINX_HOME/report.html`（通常是 `~/.brainx/report.html`），用 `file://` 打开；不需要启动服务，也没有端口。页面要写配置或排队时，浏览器需要支持目录授权（Chrome / Edge），点「选择 $BRAINX_HOME」选中数据目录即可。
+
+页面内容：四块 KPI、近 30 天入库/召回趋势、资产 kind 构成、待办三栏、三条资产榜，以及配置区。配置区只放 15 个基础旋钮，按组如下：
+
+| 组 | 旋钮 |
+|---|---|
+| 归档与原件 | 新导入文档的原件默认去向（`local` / `text-only` / `ext:<root>:<relpath>`） |
+| 整理与衰减 | 资产总量上限、记忆衰减速度、自动整理最小间隔 |
+| 召回与注入 | 单次召回条数、单次召回字数、召回超时（毫秒） |
+| 上下文与提示 | 会话上下文上限（字）、「待整理」条数门槛、「待整理」天数门槛 |
+| 待确认 | 待确认队列上限、自动确认分数门槛 |
+| 导入 | 解析并发数、单文件上限（MB） |
+| 下载 | 下载上限（MB） |
+
+页面上的「写入 config.json」只合并写入你改过的键；「确认 / 排入机械层 / 排入补写重放」只是写 `queue/cmd/*.json`，下次运行任意 `brainx` 命令时才执行，不会在页面里立即执行。其余高级配置可用 `brainx config schema` / `brainx config set` 在 CLI 处理；只读项用 `brainx config schema` 查看，页面不写。
 
 ## 四条硬契约
 
@@ -161,7 +199,6 @@ flowchart LR
 ```
 
 
-
 | 层  | 包                 | 职责                                     |
 | -- | ----------------- | -------------------------------------- |
 | 入口 | `cmd/brainx`      | 子命令、参数、退出码                             |
@@ -179,37 +216,8 @@ flowchart LR
 
 **数据模型**：`assets`、`asset_tags`、`chunks`、`chunks_fts`、`edges`、`runs`、`events`、`reviews`、`meta`。详见 [SCHEMA.md](SCHEMA.md)。
 
-## 日常使用示例
 
-```sh
-./brainx remember "数据库选型定为 SQLite：单文件、支持 FTS5" --kind fact --scope global --tag 架构
-./brainx recall "数据库" --scope global
-./brainx report
-```
-
-`recall` 输出带来源与置信度，便于核对：
-
-```
-- 数据库选型定为 SQLite：单文件、支持 FTS5
-  [id=477e694c…; kind=fact; conf=70; used=0; from=lexical+temporal]
-```
-
-`from=` 记录这条从哪几路进来：`lexical`（FTS5 BM25）、`graph`（沿边扩 1–2 跳）、`temporal`（重要度 × 时间衰减 × 使用频次）。三路按 RRF 融合，分数相同的按重要度与更新时间兜底。
-
-数据默认落在 `~/.brainx`，可用 `BRAINX_HOME` 指向任意本地目录。
-
-## 命令
-
-| 类别   | 命令                                            | 说明                          |
-| ---- | --------------------------------------------- | --------------------------- |
-| 安装与初始化 | `init` `install`                              | 建库、装宿主 hook 与约定文件            |
-| 配置与诊断 | `config` `status` `doctor` `scope`             | 配置校验、计数、体检、scope 排查          |
-| 写入   | `remember` `import` `update` `forget` `confirm` | 记忆、导入、改写、软删除、待确认             |
-| 读取   | `get [--open]` `list` `search` `recall` `context` | 精确读取、取原件、浏览、检索、上下文           |
-| 巩固   | `dream`                                       | 出候选 → Agent 判断 → 落盘          |
-| 备份与查看 | `export` `report` `wiki`                      | 整库备份、离线看板、Markdown 投影        |
-
-约定：
+硬性要求：
 
 - **写操作必须显式 `--scope`**，否则退出码 2 且不落库；`--scope proj` 会解析成当前仓库的 `proj:<hash>`，不在仓库里直接报错。
 - `search` 空查询 = 列举；不给 `--scope` 时按 cwd 判定（向上找 `.git`，取 remote 哈希或目录名），依据打在 stderr——子目录与仓库根目录判成同一个 scope。
@@ -224,7 +232,7 @@ flowchart LR
 
 ### 常用命令与参数
 
-README 只列人工在终端里常用的命令；宿主自动调用与维护/低频命令不在这里展开，完整清单运行 `brainx`（无参数）查看。
+只列人工在终端里常用的命令；宿主自动调用与维护/低频命令不在这里展开，完整清单运行 `brainx`（无参数）查看。
 
 常用前缀：
 
@@ -294,14 +302,16 @@ brainx install [--dry-run] [--uninstall [--purge --yes]] [--only <hosts>]
 
 ```sh
 brainx config schema
-brainx config get
+brainx config get <key>
+brainx config list
 brainx config set <key> <value>
 ```
 
 | 子命令 | 参数 | 说明 |
 | --- | --- | --- |
-| `schema` | — | 打印配置 JSON（键与当前默认值） |
-| `get` | — | 同 `schema` |
+| `schema` | — | 打印配置 schema（键、类型、范围与默认值） |
+| `get` | `<key>` | 打印单个键的当前值 |
+| `list` | — | 列出所有键、当前值与来源（默认值 / 配置文件） |
 | `set` | `<key> <value>` | 校验类型与范围后写 `config.json`，并记一条 `op=config` 审计；未知键拒绝 |
 
 #### `brainx status`
@@ -541,57 +551,6 @@ brainx wiki [--out <dir>]
 | --- | --- | --- |
 | `--out` | `$BRAINX_HOME/wiki` | 投影目录；只投影 active 资产，幂等 |
 
-## 端到端验证
-
-自动化部分（三格式、增量注入、`Stop` 空输出、`install` 字节幂等）已由测试覆盖：
-
-```sh
-go test ./... -run 'Test(SessionStartRendersThreeFormats|UserPromptOnlyInjectsChanges|StopWritesNothing|InstallIsIdempotentAndUninstallable)'
-```
-
-手工复核（约 30 秒）：
-
-```sh
-export BRAINX_HOME=$(mktemp -d)
-./brainx init >/dev/null
-./brainx remember "数据库选型定为 SQLite：单文件、支持 FTS5" --kind fact --scope global >/dev/null
-
-# 1. brief 必须有内容
-./brainx context --scope global
-
-# 2. 三种格式都是合法 JSON
-for f in claude-code codex cursor; do
-  printf '{"cwd":"%s"}' "$PWD" | ./brainx hook --event session-start --format "$f" | python3 -m json.tool >/dev/null && echo "$f ok"
-done
-
-# 3. 无变化时 user-prompt 输出空；stop 严格空
-printf '{"cwd":"%s"}' "$PWD" | ./brainx hook --event user-prompt --format claude-code | wc -c
-printf '{}' | ./brainx hook --event stop --format claude-code | wc -c
-
-# 4. install 连跑两次：sha256 相同、mtime 不变
-export HOME=$(mktemp -d) && mkdir -p "$HOME/.claude"
-./brainx install --only claude-code >/dev/null
-first=$(shasum -a 256 "$HOME/.claude/settings.json" | awk '{print $1}'); m1=$(stat -f %m "$HOME/.claude/settings.json")
-sleep 1
-./brainx install --only claude-code >/dev/null
-second=$(shasum -a 256 "$HOME/.claude/settings.json" | awk '{print $1}'); m2=$(stat -f %m "$HOME/.claude/settings.json")
-[ "$first" = "$second" ] && [ "$m1" = "$m2" ] && echo "install idempotent"
-```
-
-预期输出：
-
-```
-## 已知上下文
-- [fact] 数据库选型定为 SQLite：单文件、支持 FTS5
-claude-code ok
-codex ok
-cursor ok
-0
-0
-install idempotent
-```
-
-> `wc -c` 在 macOS 上会带前导空格，结果是 0 字节即通过；`shasum` 与 `stat -f` 是 macOS 写法，Linux 对应 `sha256sum` 与 `stat -c %Y`。
 
 ## 数据与迁移
 
@@ -599,16 +558,20 @@ install idempotent
 $BRAINX_HOME/
   store.db          SQLite（WAL、FTS5）
   config.json       有校验的配置
+  manifest.json     库格式与创建时间
+  AGENTS.block.md   宿主约定文件正文真源
   files/            库内原件
   queue/            补写队列（queue/cmd 为看板命令，queue/dead 为死信）
-  cache/            原件下载缓存（不进 .mbz）
+  cache/            下载缓存（cache/fetch）
+  dict/             词典/扩展数据目录
+  wiki/             Markdown 投影目录
   report.html       brainx report 生成的看板
 ```
 
 - 备份：拷贝整个目录。
-- 迁移：`brainx export out.mbz` 生成压缩包，解开即用；库内引用全是相对路径。压缩包不含 `cache/` 与 `store.db-wal` / `store.db-shm`（checkpoint 后它们只是临时文件，恢复时 SQLite 会重建）。
+- 迁移：`brainx export out.mbz` 生成压缩包；在新机器用 `brainx import out.mbz`（覆盖现有库时加 `--replace`）恢复。库内引用全是相对路径。压缩包不含 `cache/` 与 `store.db-wal` / `store.db-shm`（checkpoint 后它们只是临时文件，恢复时 SQLite 会重建）。
 
-## 宿主兼容
+## 兼容性
 
 | 宿主          | 事件                                             | 接入方式          |
 | ----------- | ---------------------------------------------- | ------------- |
@@ -656,31 +619,9 @@ Codex **每层只读第一个非空文件**：`AGENTS.override.md` 存在时 `AG
 
 约定文件是**兜底**：注入主力是 hook，AGENTS 段只在 hook 没装或被跳过时起作用（它的四条职责里，「存」尤其需要 Agent 主动判断，hook 代替不了）。
 
-## 路线图
+## 里程碑与验收结果
 
-| 里程碑       | 内容                                                        | 状态                     |
-| --------- | --------------------------------------------------------- | ---------------------- |
-| M0 骨架     | 静态二进制、`init`、FTS5 bigram                                  | ✅ 通过自动验收               |
-| M1 注入闭环   | hook 三事件、`install` 幂等写配置                                  | ✅ 自动验收通过，真机注入待验证       |
-| M2 存储检索   | 三路召回（词法 / 图谱 / 时序）+ 冲突提示、预算、scope 规则、延迟预算          | ✅ 通过自动验收               |
-| M3 导入归档   | md / txt / pdf / docx / html / xlsx 解析、三档归档落盘、`open`、路径扫描、wiki 投影 | ✅ 通过自动验收               |
-| M4 巩固     | `dream --plan` / `--apply`、机械层、`insight` 待确认、去重        | ✅ 通过自动验收               |
-| M5 向量（可选） | 显式开启的 embeddings + 余弦                                     | ⬜ 未开始                  |
-| M6 看板     | 六区块、口径说明、30 天趋势                                           | ✅ 通过自动验收               |
-
-未做：M5 向量、M9 MCP 薄壳（按指示不做）；真实宿主注入需要在本机肉眼验证。
-
-## 设计文档
-
-- [SCHEMA.md](SCHEMA.md)：数据模型与可变性契约
-- [INTEGRATION.md](INTEGRATION.md)：宿主 hook 契约与接入片段
-- [docs/brainx-prd.md](docs/brainx-prd.md)：历史产品需求文档（非用户手册，以 README 为准）
-- [docs/brainx-technical-architecture.md](docs/brainx-technical-architecture.md)：历史技术架构文档（非用户手册，以代码为准）
-- [scripts/migrate-drill.sh](scripts/migrate-drill.sh)：导出 → 异路径导入 → 断言
-
-## 里程碑与验收结果（2026-10-27）
-
-自动验收 **94 项全过 / 0 失败**（`./scripts/acceptance.sh ./brainx`，退出码 0）；单元测试 9 个有测试的包全过（共 11 个包），`gofmt` / `go vet` 干净。M0–M8 + M10 的自动化验收完成（真实宿主注入待肉眼验证），M9（MCP 薄壳）未做。复测补充见 `验收报告-2026-10-27.md`。
+自动验收 **94 项全过 / 0 失败**（`./scripts/acceptance.sh ./brainx`，退出码 0）；单元测试 **10 个有测试的包**全过（共 11 个包），`gofmt` / `go vet` 干净。M0–M8 + M10 的自动化验收完成；Codex 真机注入已实测，其他宿主按兼容性说明接入；M9（MCP 薄壳）未做。
 
 | 里程碑 | 覆盖的验收点 | 项数 | 结果 |
 |---|---|---|---|
@@ -688,48 +629,15 @@ Codex **每层只读第一个非空文件**：`AGENTS.override.md` 存在时 `AG
 | **M1** 存储·分块·词法 | `remember` 后切成 1 片 / FTS 命中 / **2 字词查询**（bigram 生效）/ 长文档多片且**中间段落在 seq≠0** / doc 标题回退取到 H1 / doc 的 summary 恒为空 | 8 | 全过 |
 | **M2** scope·CLI 契约 | 写操作不给 scope → 退出码 2 且不落行 / 读操作自动判定并留痕 / `--scope proj` 在非仓库目录报错并给替代方案 / 子目录与仓库根判成同一 scope / brief 按条目裁剪不切半句 / 冷启动 **9.5ms**（预算 60ms） | 7 | 全过 |
 | **M3** 导入·归档·取原件 | html 剔 script / docx / **xlsx 转 Markdown 表格** / 表格切 14 片**每片都带表头** / xls 明确报错 / 空正文退出码 2 / 重复导入不新建 / `local` 落 `files/` / `ext:` 只记相对路径 / 库内零绝对路径 / 根不可达检索仍正常 / `open` 退出码 4 + 纯 JSON options 三项 / 拔根不拖慢热路径 | 16 | 全过 |
-| **M4** 三路召回 | 结果带 `from=` 来源标注 / 预算裁剪生效（max_chars=200 → 155 字节）；万级 P95 由 `TestRecallP95` 覆盖（p95 3.2ms） | 2 | 全过 |
+| **M4** 三路召回 | 结果带 `from=` 来源标注 / 预算裁剪生效（max_chars=200 → 155 字节）；万级 P95 由 `TestRecallP95` 覆盖 | 2 | 全过 |
 | **M5** 巩固 C1 + 机械层 | plan 头部含 `plan_id` / plan **零资产写入** / 错 `plan_id` → 5 / `dream` 后 doc 的 `content_hash` 全不变 / merge 涉 doc → 5 / stdin 传判断可用 / 机械层独立跑通 / 全库无 `frozen` | 9 | 全过 |
 | **M6** 巩固 C2 · 派生 | derive 出清单 / **insight 落 pending、≥2 条 `derived_from`、未确认不进召回** | 5 | 全过 |
 | **M7** 迁移 + 派生导出 | `export` → 换父目录后检索一致 / 原件仍可解析 / **derived 不含 doc、index.md 声明快照、连跑两次 mtime 不变** / URL 根不可达 → 退出码 8 且不挂起 | 7 | 全过 |
 | **M8** 跨宿主 | hook 三格式均为合法 JSON / `Stop` stdout 严格为空 / 无变化时 `UserPromptSubmit` 0 字节 / 重复 `install` 字节级不变 / Codex `features.hooks` 已开 / AGENTS 含「存·取·整理·待确认」四段 / **override 非空时写进 override 且不覆盖用户内容** / `--agents-target main` 可强制 / 非法取值退出码 2 / 卸载后 `.codex` 下零残留 | 14 | 全过 |
-| **M10** 看板 | 单文件 35KB / 零外部资源 / 六区块齐全 / 零监听 / 页面写越界值后 CLI 不崩且报出非法键 / `op=config` 审计 | 6 | 全过 |
+| **M10** 看板 | 单文件 / 零外部资源 / 六区块齐全 / 零监听 / 页面写越界值后 CLI 不崩且报出非法键 / `op=config` 审计 | 6 | 全过 |
 | **queue 契约** | 坏命令被丢弃不重试 / 只跑 `Stop` 就能消费排队命令 / 只跑 `Stop` 就把补偿队列排空并落库 / `session-start` 队列非空时只报数不补写 / `doctor` 全量补写 | 5 | 全过 |
 | **全局约束** | 无 redis / postgresql / neo4j / docker-compose 引用 / **联网调用点仅限 `embed.go` 与 `archive.go`** / `Embedder` 在 `vector.enabled` 为假时不可达 / `update` 后新词命中、旧词查不到 | 7 | 全过 |
 
-**测不了的四项**（不是没做，是只能在真实环境验）：brief 是否真的进了 Codex / DSH 的上下文；冷启动在 M1 Air 与 Windows 16G 上的数据；`fswatch` 级的「`$BRAINX_HOME` 之外零写入」；DSH 全自动安装（缺一份真实 DSH hooks 配置样例）。
-
-## 验收怎么跑
-
-```bash
-CGO_ENABLED=0 go build -o brainx ./cmd/brainx
-./scripts/acceptance.sh ./brainx   # 94 项，全过时退出码 0
-go test ./...                      # 单元测试（9 个有测试的包，共 11 个包）
-```
-
-`scripts/acceptance.sh` 对应提示词 §8 总验收清单里可自动化的部分，全程在临时目录里跑，不碰真实库与真实宿主配置。测不了的四项（真实宿主注入、M1 Air/Windows 冷启动、fswatch、DSH 路径）写在 `验收报告-2026-10-27.md` 里。
-
-## 发布包
-
-```bash
-VERSION=v1.0.0 ./scripts/release.sh
-```
-
-会在 `dist/` 生成 6 个目标的压缩包：
-
-```text
-brainx_v1.0.0_darwin_amd64.tar.gz
-brainx_v1.0.0_darwin_arm64.tar.gz
-brainx_v1.0.0_linux_amd64.tar.gz
-brainx_v1.0.0_linux_arm64.tar.gz
-brainx_v1.0.0_windows_amd64.zip
-brainx_v1.0.0_windows_arm64.zip
-checksums.txt
-```
-
-每个包内含二进制、`README.md`、`LICENSE`、`THIRD_PARTY_LICENSES.md`、`SCHEMA.md`、`INTEGRATION.md`、`docs/` 和 `licenses/`。仓库地址：`https://github.com/ksi512/BrainX-prototype`。
-
-CI、macOS 签名/notarization、Windows Authenticode 的步骤见 [docs/release.md](docs/release.md)。
 
 ## License
 
