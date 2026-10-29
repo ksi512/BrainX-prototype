@@ -2,6 +2,7 @@ package recall_test
 
 import (
 	"fmt"
+	"runtime"
 	"sort"
 	"testing"
 	"time"
@@ -17,6 +18,9 @@ import (
 func TestRecallP95(t *testing.T) {
 	if raceEnabled {
 		t.Skip("go test -race 会插桩放大延迟，P95 断言只在普通 go test 下跑")
+	}
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows CI 的 SQLite 文件性能不代表目标平台，P95 在 macOS/Linux 测")
 	}
 	if testing.Short() {
 		t.Skip("造万级库很慢，-short 下跳过")
